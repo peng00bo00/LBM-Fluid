@@ -3,8 +3,8 @@ A simple LBM fluid simulator based on [NVIDIA Warp](https://nvidia.github.io/war
 
 ## Cavity Flow
 
-![Imgur](https://imgur.com/RfRR0pl.gif)
+![](https://imgur.com/RfRR0pl.gif)
 
 ## Kármán vortex street
 
-![Imgur](https://i.imgur.com/9HsKh4i.gif)
+![](https://i.imgur.com/9HsKh4i.gif)
