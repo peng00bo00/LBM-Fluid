@@ -4,17 +4,24 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
+
 ## fluid grid
-H = wp.constant(256)
-W = wp.constant(256)
-L = H - 1.0
+H = wp.constant(101)
+W = wp.constant(401)
 shape = (H, W)
 
+## cylindar
+ci = wp.constant(50.0)
+cj = wp.constant(80.0)
+r  = wp.constant(10.0)
+
 ## constants
-Re = wp.constant(1000.0)
+Re = wp.constant(200.0)
 U  = wp.constant(0.1)
-nu = U * L / Re
-tau = 3.0 * nu + 0.5
+D  = 2 * r
+nu = U * D / Re
+
+tau  = 3.0 * nu + 0.5
 omega = 1.0 / tau
 
 ## D2Q9 model
@@ -28,14 +35,16 @@ w = wp.array([4/9,
               1/36, 1/36, 1/36, 1/36], 
               dtype=float)
 
-## rho and velocity
-rho = wp.ones(shape=shape, dtype=float)
-vel = wp.zeros(shape=shape, dtype=wp.vec2f)
+## initialize rho and velocity
+rho  = wp.ones(shape=shape, dtype=float)
+vel  = wp.zeros(shape=shape, dtype=wp.vec2f)
 
-## distribution function
 fold = wp.ones(shape=(H, W, 9), dtype=float)
 fnew = wp.ones(shape=(H, W, 9), dtype=float)
 feqb = wp.ones(shape=(H, W, 9), dtype=float)
+
+mask = wp.zeros(shape=(H, W), dtype=wp.bool)
+
 
 ## warp functions
 @wp.func
@@ -58,8 +67,23 @@ def feq(w: float, rho: float, e: wp.vec2f, u: wp.vec2f) -> float:
 
     return f
 
-
 ## warp kernels
+@wp.kernel
+def createCylindar(mask: wp.array2d(dtype=wp.bool),
+                   ci: float,
+                   cj: float,
+                   r: float):
+    i, j = wp.tid()
+
+    fi = float(i)
+    fj = float(j)
+    d = wp.sqrt((fi - ci)*(fi - ci) + (fj - cj)*(fj - cj))
+
+    if d <= r:
+        mask[i, j] = True 
+    else:
+        mask[i, j] = False
+
 @wp.kernel
 def initFluid(rho: wp.array2d(dtype=float), 
               vel: wp.array2d(dtype=wp.vec2f),
@@ -135,64 +159,81 @@ def boundaryCondition(rho: wp.array2d(dtype=float),
                       vel: wp.array2d(dtype=wp.vec2f),
                       e: wp.array1d(dtype=wp.vec2i),
                       w: wp.array1d(dtype=float),
+                      mask: wp.array2d(dtype=wp.bool),
                       feqb: wp.array3d(dtype=float),
                       fold: wp.array3d(dtype=float)):
     """Apply boundary conditions on grid.
     """
     i, j = wp.tid()
 
-    if not atGridBoundary(i, j):
+    if not atGridBoundary(i, j) and not mask[i, j]:
         ## update equilibrium
         for k in range(9):
             feqb[i, j, k] = feq(w[k], rho[i, j], wp.vec2f(e[k]), vel[i, j])
         
         return
-    
+
     inb = i
     jnb = j
 
-    ## update top boundary
-    if i == 0:
-        vel[i, j][0] = 0.0
-        vel[i, j][1] = U
+    if atGridBoundary(i, j):
+        ## update top boundary
+        if i == 0:
+            vel[i, j][0] = 0.0
+            vel[i, j][1] = 0.0
 
-        inb = i+1
-
-    ## update bottom boundary
-    elif i == H-1:
-        vel[i, j][0] = 0.0
-        vel[i, j][1] = 0.0
+            inb = i+1
         
-        inb = i-1
+        ## update bottom boundary
+        elif i == H-1:
+            vel[i, j][0] = 0.0
+            vel[i, j][1] = 0.0
 
-    ## update left boundary
-    elif j == 0:
+            inb = i-1            
+
+        ## update left boundary
+        elif j == 0:
+            vel[i, j][0] = 0.0
+            vel[i, j][1] = U
+
+            jnb = j+1            
+
+        ## update right boundary
+        elif j == W - 1:
+            vel[i, j][0] = vel[i, j-1][0]
+            vel[i, j][1] = vel[i, j-1][1]
+
+            jnb = j-1
+
+    ## update cylinder obstacle
+    elif mask[i, j]:
         vel[i, j][0] = 0.0
         vel[i, j][1] = 0.0
 
-        jnb = j+1
+        if i <= ci and j <= cj:
+            inb = i-1
+            jnb = j-1
+        
+        elif i <= ci and j > cj:
+            inb = i-1
+            jnb = j+1
+        
+        elif i > ci and j <= cj:
+            inb = i+1
+            jnb = j-1
+                
+        else:
+            inb = i+1
+            jnb = j+1
 
-    ## update right boundary
-    elif j == W - 1:
-        vel[i, j][0] = 0.0
-        vel[i, j][1] = 0.0
-
-        jnb = j-1
-    
     ## update rho
     rho[i, j] = rho[inb, jnb]
-    
+
     ## update equilibrium
     for k in range(9):
         f = feq(w[k], rho[i, j], wp.vec2f(e[k]), vel[i, j])
         fold[i, j, k] = f
         feqb[i, j, k] = f
-
-
-## rendering
-NUM_STEP   = 100000
-SUB_STEP   = 500
-NUM_FRAMES = NUM_STEP // SUB_STEP
 
 def step():
     global fnew, fold, feqb
@@ -217,7 +258,12 @@ def step():
     with wp.ScopedTimer("Boundary Condition", active=False):
         wp.launch(kernel=boundaryCondition,
                     dim=shape,
-                    inputs=[rho, vel, e, w, feqb, fold])
+                    inputs=[rho, vel, e, w, mask, feqb, fold])
+
+## rendering
+NUM_STEP   = 20000
+SUB_STEP   = 40
+NUM_FRAMES = NUM_STEP // SUB_STEP
 
 def renderFrame(num_frame=None, frame=None):
     ## sub-steps simulation
@@ -230,17 +276,24 @@ def renderFrame(num_frame=None, frame=None):
     vel_mag = np.sqrt(vel_mag)
 
     frame.set_array(vel_mag)
+    fig.tight_layout()
     
     return (frame,)
 
-
 ## launch kernel
+wp.launch(kernel=createCylindar,
+          dim=shape,
+          inputs=[mask, ci, cj, r])
+
 wp.launch(kernel=initFluid,
           dim=shape,
           inputs=[rho, vel, e, w, fold, fnew, feqb])
 
 ## start rendering
-fig = plt.figure()
+fig = plt.figure(figsize=(8,2))
+ax  = plt.gca()
+ax.set_aspect('equal')
+
 frame = plt.imshow(wp.zeros_like(rho).numpy(), 
                     animated=True,
                     interpolation="antialiased")
@@ -249,7 +302,7 @@ plt.xticks([])
 plt.yticks([])
 fig.tight_layout()
 
-frame.set_norm(matplotlib.colors.Normalize(0.0, 0.1))
+frame.set_norm(matplotlib.colors.Normalize(0.0, 0.2))
 
 seq = anim.FuncAnimation(
     fig,
@@ -257,9 +310,9 @@ seq = anim.FuncAnimation(
     fargs=(frame,),
     frames=NUM_FRAMES,
     blit=True,
-    interval=50,
+    interval=2,
     repeat=False,
 )
 
 plt.show()
-# seq.save("cavity.gif", writer="ffmpeg", fps=20, dpi=300)
+# seq.save("vortex.gif", writer="ffmpeg", fps=20, dpi=300)
