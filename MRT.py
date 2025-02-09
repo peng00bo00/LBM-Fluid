@@ -16,7 +16,7 @@ cj = wp.constant(80.0)
 r  = wp.constant(10.0)
 
 ## constants
-Re = wp.constant(200.0)
+Re = wp.constant(50000.0)
 U  = wp.constant(0.05)
 D  = 2 * r
 nu = U * D / Re
@@ -35,6 +35,45 @@ w = wp.array([4/9,
               1/36, 1/36, 1/36, 1/36], 
               dtype=float)
 
+bi = wp.array([0, 3, 4, 1, 2, 7, 8, 5, 6], dtype=int)
+
+## MRT
+vec9f = wp.vec(length=9, dtype=float)
+d = vec9f(1./9, 1./36, 1./36, 1./6,
+          1./12, 1./6, 1./12, 1./4, 1./4)
+d = wp.constant(d)
+
+s = vec9f(1.0, 1.63, 1.14, 1.0, 1.92, 0.0, 1.92, omega, omega)
+s = wp.constant(s)
+
+mat99f = wp.mat(shape=(9, 9), dtype=float)
+M = mat99f( 
+            1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,
+           -4.0, -1.0, -1.0, -1.0, -1.0,  2.0,  2.0,  2.0,  2.0,
+            4.0, -2.0, -2.0, -2.0, -2.0,  1.0,  1.0,  1.0,  1.0,
+            0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0,
+            0.0, -2.0,  0.0,  2.0,  0.0,  1.0, -1.0, -1.0,  1.0,
+            0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0,
+            0.0,  0.0, -2.0,  0.0,  2.0,  1.0,  1.0, -1.0, -1.0,
+            0.0,  1.0, -1.0,  1.0, -1.0,  0.0,  0.0,  0.0,  0.0,
+            0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -1.0,  1.0, -1.0
+        )
+
+Minv = mat99f( 
+            1.0, -4.0,  4.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+            1.0, -1.0, -2.0,  1.0, -2.0,  0.0,  0.0,  1.0,  0.0,
+            1.0, -1.0, -2.0,  0.0,  0.0,  1.0, -2.0, -1.0,  0.0,
+            1.0, -1.0, -2.0, -1.0,  2.0,  0.0,  0.0,  1.0,  0.0,
+            1.0, -1.0, -2.0,  0.0,  0.0, -1.0,  2.0, -1.0,  0.0,
+            1.0,  2.0,  1.0,  1.0,  1.0,  1.0,  1.0,  0.0,  1.0,
+            1.0,  2.0,  1.0, -1.0, -1.0,  1.0,  1.0,  0.0, -1.0,
+            1.0,  2.0,  1.0, -1.0, -1.0, -1.0, -1.0,  0.0,  1.0,
+            1.0,  2.0,  1.0,  1.0,  1.0, -1.0, -1.0,  0.0, -1.0,
+        )
+
+M = wp.constant(M)
+Minv = wp.constant(Minv)
+
 ## initialize rho and velocity
 rho  = wp.ones(shape=shape, dtype=float)
 vel  = wp.zeros(shape=shape, dtype=wp.vec2f)
@@ -45,8 +84,83 @@ feqb = wp.ones(shape=(H, W, 9), dtype=float)
 
 mask = wp.zeros(shape=(H, W), dtype=wp.bool)
 
-
 ## warp functions
+@wp.func
+def dot(x: vec9f, y: vec9f) -> float:
+    ret = 0.
+
+    for i in range(9):
+        ret += x[i] * y[i]
+
+    return ret
+
+@wp.func
+def dot(A: mat99f, x: vec9f) -> vec9f:
+    y = vec9f(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    for i in range(9):
+        for j in range(9):
+            y[i] += A[i, j] * x[j]
+
+    return y
+
+@wp.func
+def dot(A: mat99f, B: mat99f) -> mat99f:
+    C = mat99f(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+               )
+
+    for i in range(9):
+        for j in range(9):
+            s = 0.
+            s+= A[i, 0] * B[0, j]
+            s+= A[i, 1] * B[1, j]
+            s+= A[i, 2] * B[2, j]
+            s+= A[i, 3] * B[3, j]
+            s+= A[i, 4] * B[4, j]
+            s+= A[i, 5] * B[5, j]
+            s+= A[i, 6] * B[6, j]
+            s+= A[i, 7] * B[7, j]
+            s+= A[i, 8] * B[8, j]
+
+            C[i, j] = s
+
+    return C
+
+@wp.func
+def mul(x: vec9f, y: vec9f) -> vec9f:
+    z = vec9f(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    for i in range(9):
+        z[i] = x[i] * y[i]
+
+    return z
+
+@wp.func
+def add(x: vec9f, y: vec9f) -> vec9f:
+    z = vec9f(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    for i in range(9):
+        z[i] = x[i] + y[i]
+
+    return z
+
+@wp.func
+def sub(x: vec9f, y: vec9f) -> vec9f:
+    z = vec9f(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    for i in range(9):
+        z[i] = x[i] - y[i]
+
+    return z
+
 @wp.func
 def atGridBoundary(i: int, j: int) -> bool:
     """Check if [i, j] is at the grid boundary.
@@ -67,6 +181,16 @@ def feq(w: float, rho: float, e: wp.vec2f, u: wp.vec2f) -> float:
 
     return f
 
+@wp.func
+def toMoment(f: vec9f) -> vec9f:
+    return dot(M, f)
+
+@wp.func
+def fromMoment(m: vec9f) -> vec9f:
+    dm = mul(d, m)
+    return dot(Minv, dm)
+
+
 ## warp kernels
 @wp.kernel
 def createCylindar(mask: wp.array2d(dtype=wp.bool),
@@ -80,7 +204,7 @@ def createCylindar(mask: wp.array2d(dtype=wp.bool),
     d = wp.sqrt((fi - ci)*(fi - ci) + (fj - cj)*(fj - cj))
 
     if d <= r:
-        mask[i, j] = True 
+        mask[i, j] = True
     else:
         mask[i, j] = False
 
@@ -110,9 +234,26 @@ def collide(feqb: wp.array3d(dtype=float),
             fold: wp.array3d(dtype=float)):
 
     i, j = wp.tid()
+    
+    fVec = vec9f()
+    feqbVec = vec9f()
+    
+    for k in range(9):
+        fVec[k] = fold[i, j, k]
+        feqbVec[k] = feqb[i, j, k]
+    
+    ## moment space
+    m    = toMoment(fVec)
+    meq  = toMoment(feqbVec)
 
     for k in range(9):
-        fold[i, j, k] = (1.0 - omega) * fold[i, j, k] + omega * feqb[i, j, k]
+        m[k] = (1.0 - s[k]) * m[k] + s[k] * meq[k]
+    
+    ## back to fluid
+    fm = fromMoment(m)
+
+    for k in range(9):
+        fold[i, j, k] = fm[k]
 
 @wp.kernel
 def stream(e: wp.array1d(dtype=wp.vec2i),
@@ -163,7 +304,7 @@ def boundaryCondition(rho: wp.array2d(dtype=float),
                       feqb: wp.array3d(dtype=float),
                       fold: wp.array3d(dtype=float)):
     """Apply boundary conditions on grid.
-    """
+    """    
     i, j = wp.tid()
 
     if not atGridBoundary(i, j) and not mask[i, j]:
@@ -183,13 +324,21 @@ def boundaryCondition(rho: wp.array2d(dtype=float),
             vel[i, j][1] = 0.0
 
             inb = i+1
+
+            fold[i, j, 4] = fold[i, j, 2]
+            fold[i, j, 7] = fold[i, j, 5]
+            fold[i, j, 8] = fold[i, j, 6]
         
         ## update bottom boundary
         elif i == H-1:
             vel[i, j][0] = 0.0
             vel[i, j][1] = 0.0
 
-            inb = i-1            
+            inb = i-1       
+
+            fold[i, j, 2] = fold[i, j, 4]
+            fold[i, j, 5] = fold[i, j, 7]
+            fold[i, j, 6] = fold[i, j, 8]     
 
         ## update left boundary
         elif j == 0:
@@ -316,4 +465,4 @@ seq = anim.FuncAnimation(
 )
 
 plt.show()
-# seq.save("vortex.gif", writer="ffmpeg", fps=20, dpi=100)
+# seq.save("turbulence.gif", writer="ffmpeg", fps=20, dpi=100)

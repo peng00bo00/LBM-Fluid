@@ -221,8 +221,9 @@ def step():
 
 def renderFrame(num_frame=None, frame=None):
     ## sub-steps simulation
-    for _ in range(SUB_STEP):
-        step()
+    with wp.ScopedTimer("Rendering Frame", active=True):
+        for _ in range(SUB_STEP):
+            step()
     
     ## update frame
     vel_numpy = vel.numpy()

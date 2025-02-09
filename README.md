@@ -7,4 +7,8 @@ A simple LBM fluid simulator based on [NVIDIA Warp](https://nvidia.github.io/war
 
 ## Kármán vortex street
 
-![](https://i.imgur.com/9HsKh4i.gif)
+![](https://i.imgur.com/NxWHYaY.gif)
+
+## Turbulence
+
+![](https://i.imgur.com/bxiubUf.gif)
